@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Admin — Portfolio Editor</title>
+<style>
+  :root { --bg:#fafafa; --fg:#111; --mut:#777; --line:#ddd; --card:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0d0d0d; --fg:#f2f2f2; --mut:#999; --line:#2a2a2a; --card:#161616; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--fg); }
+  [hidden] { display:none !important; }
+  #login { min-height:100vh; display:grid; place-items:center; }
+  #login form { width:min(340px,90vw); display:grid; gap:12px; }
+  h1 { font-size:22px; margin:0 0 4px; letter-spacing:-.02em; }
+  header.top { position:sticky; top:0; z-index:5; background:var(--bg); border-bottom:1px solid var(--line); padding:12px 20px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; }
+  .tabs { display:flex; flex-wrap:wrap; gap:6px; padding:14px 20px 0; }
+  .tabs button.on { background:var(--fg); color:var(--bg); }
+  main { max-width:820px; margin:0 auto; padding:16px 20px 80px; }
+  button, .btn { font:inherit; border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:999px; padding:6px 14px; cursor:pointer; text-decoration:none; display:inline-block; }
+  button:hover { border-color:var(--fg); }
+  button.pri { background:var(--fg); color:var(--bg); border-color:var(--fg); }
+  input, textarea, select { font:inherit; width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--fg); }
+  label.f { display:grid; gap:4px; margin:10px 0; }
+  label.f > span { font-size:12px; color:var(--mut); }
+  label.chk { display:flex; align-items:center; gap:8px; } label.chk input { width:auto; }
+  .card { border:1px solid var(--line); background:var(--card); border-radius:16px; padding:14px 16px; margin:12px 0; }
+  .bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+  .bar span { display:flex; gap:4px; } .bar button { padding:2px 10px; }
+  .pv { max-height:90px; max-width:100%; border-radius:8px; border:1px solid var(--line); justify-self:start; background:#8883; }
+  .pv[src=""] { display:none; }
+  .note { color:var(--mut); font-size:12px; margin:6px 0 12px; }
+  #msg { position:fixed; bottom:16px; right:16px; background:var(--fg); color:var(--bg); padding:10px 16px; border-radius:12px; opacity:0; transition:.3s; pointer-events:none; }
+  #msg.on { opacity:1; }
+</style>
+</head>
+<body>
+<div id="login">
+  <form id="lf">
+    <h1>Admin login</h1>
+    <input id="pw" type="password" placeholder="Password" autofocus>
+    <button class="pri">Enter</button>
+    <div class="note" id="lerr"></div>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header class="top">
+    <b>Portfolio Editor</b>
+    <span style="display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn" href="index.html" target="_blank">Preview site ↗</a>
+      <button id="exp">Export site-data.js</button>
+      <button id="imp">Import</button>
+      <button id="rst">Reset</button>
+      <button class="pri" id="save">Save</button>
+    </span>
+  </header>
+  <nav class="tabs" id="tabs"></nav>
+  <main id="main"></main>
+</div>
+<input type="file" id="impf" accept=".json,.js" hidden>
+<div id="msg"></div>
+
+<script src="site-data.js"></script>
+<script>
+(function () {
+  var D = window.SITE_DEFAULT, S = null;
+  try { S = JSON.parse(localStorage.getItem('echo_site') || 'null'); } catch (e) {}
+  var clone = function (x) { return JSON.parse(JSON.stringify(x)); };
+  S = S || clone(D);
+  Object.keys(D).forEach(function (k) { if (S[k] === undefined) S[k] = clone(D[k]); });
+
+  var $ = function (q) { return document.querySelector(q); };
+  function h(tag, attrs) {
+    var e = document.createElement(tag); attrs = attrs || {};
+    for (var k in attrs) { if (k === 'class') e.className = attrs[k]; else if (k.indexOf('on') === 0) e[k] = attrs[k]; else e.setAttribute(k, attrs[k]); }
+    for (var i = 2; i < arguments.length; i++) { [].concat(arguments[i]).forEach(function (c) { e.append(c); }); }
+    return e;
+  }
+  function msg(t) { var m = $('#msg'); m.textContent = t; m.classList.add('on'); setTimeout(function () { m.classList.remove('on'); }, 2200); }
+  function btn(t, fn, cls) { return h('button', { type: 'button', onclick: fn, class: cls || '' }, t); }
+
+  // login
+  function open() { $('#login').hidden = true; $('#app').hidden = false; show(cur); }
+  $('#lf').onsubmit = function (e) {
+    e.preventDefault();
+    if ($('#pw').value === S.adminPassword) { sessionStorage.setItem('echo_admin', '1'); open(); }
+    else $('#lerr').textContent = 'Wrong password.';
+  };
+
+  // image picker -> resized data URL
+  function pick(file) {
+    return new Promise(function (res) {
+      var r = new FileReader();
+      r.onload = function () {
+        var im = new Image();
+        im.onload = function () {
+          var s = Math.min(1, 1600 / Math.max(im.width, im.height)), c = document.createElement('canvas');
+          c.width = im.width * s; c.height = im.height * s;
+          c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+          res(/png|webp|gif/.test(file.type) ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.85));
+        };
+        im.src = r.result;
+      };
+      r.readAsDataURL(file);
+    });
+  }
+
+  function fld(o, k, label, t, opts) {
+    t = t || 'text';
+    var w = h('label', { class: 'f' }, h('span', {}, label)), i;
+    if (t === 'area') { i = h('textarea', { rows: 3 }); i.value = o[k] == null ? '' : o[k]; i.oninput = function () { o[k] = i.value; }; }
+    else if (t === 'list') { i = h('input'); i.value = (o[k] || []).join(', '); i.oninput = function () { o[k] = i.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean); }; }
+    else if (t === 'bool') { w.className = 'f chk'; i = h('input', { type: 'checkbox' }); i.checked = o[k] !== false; i.onchange = function () { o[k] = i.checked; }; w.prepend(i); return w; }
+    else if (t === 'sel') { i = h('select'); opts.forEach(function (x) { i.append(h('option', { value: x }, x)); }); i.value = o[k]; i.onchange = function () { o[k] = i.value; }; }
+    else if (t === 'img') {
+      var pv = h('img', { class: 'pv', src: o[k] || '' });
+      i = h('input', { placeholder: 'Path like assets/me.png, or upload below' });
+      i.value = (o[k] || '').indexOf('data:') === 0 ? '(uploaded image)' : (o[k] || '');
+      i.oninput = function () { o[k] = i.value; pv.src = i.value; };
+      var fi = h('input', { type: 'file', accept: 'image/*' });
+      fi.onchange = function () { if (fi.files[0]) pick(fi.files[0]).then(function (u) { o[k] = u; i.value = '(uploaded image)'; pv.src = u; }); };
+      w.append(i, pv, fi); return w;
+    }
+    else { i = h('input'); i.value = o[k] == null ? '' : o[k]; i.oninput = function () { o[k] = i.value; }; }
+    w.append(i); return w;
+  }
+
+  function items(arr, fill, make, name) {
+    var box = h('div');
+    function mv(i, d) { var j = i + d; if (j < 0 || j >= arr.length) return; var t = arr[i]; arr[i] = arr[j]; arr[j] = t; draw(); }
+    function draw() {
+      box.innerHTML = '';
+      arr.forEach(function (it, i) {
+        var c = h('div', { class: 'card' }, h('div', { class: 'bar' }, h('b', {}, name + ' ' + (i + 1)),
+          h('span', {}, btn('↑', function () { mv(i, -1); }), btn('↓', function () { mv(i, 1); }), btn('✕', function () { arr.splice(i, 1); draw(); }))));
+        fill(it, c); box.append(c);
+      });
+      box.append(btn('+ Add ' + name, function () { arr.push(make()); draw(); }));
+    }
+    draw(); return box;
+  }
+
+  var P = function () { return S.profile; };
+  var TABS = {
+    Profile: function () { var p = P(); return [
+      fld(p, 'name', 'Full name'), fld(p, 'heroLine1', 'Hero title — line 1'), fld(p, 'heroLine2', 'Hero title — line 2 (metallic)'),
+      fld(p, 'estLabel', 'Small label (e.g. AGE 19 • KANPUR)'), fld(p, 'tagline', 'Tagline', 'area'),
+      fld(p, 'roles', 'Roles (comma separated — these also drive the hero list)', 'list'),
+      fld(p, 'location', 'Location'), fld(p, 'college', 'College / school'),
+      fld(p, 'photo', 'Hero photo (PNG with transparent background looks best; leave empty to hide)', 'img'),
+      fld(p, 'aboutHeadline', 'About headline'), fld(p, 'aboutText', 'About text', 'area'),
+      fld(p, 'aboutImage', 'About card image', 'img'), fld(p, 'aboutBg', 'About background image', 'img')]; },
+    Stats: function () { return [items(S.stats, function (o, c) { c.append(fld(o, 'value', 'Number (e.g. 10+)'), fld(o, 'label', 'Label')); }, function () { return { value: '0', label: 'Label' }; }, 'Stat')]; },
+    Experience: function () { return [h('div', { class: 'note' }, 'Use <br> in the title for a line break.'),
+      items(S.experience, function (o, c) {
+        c.append(fld(o, 'tab', 'Short tab name'), fld(o, 'dates', 'Dates (e.g. 2024 — PRESENT)'), fld(o, 'label', 'Label / phase name'), fld(o, 'badge', 'Badge (optional)'),
+          fld(o, 'title', 'Big title'), fld(o, 'summary', 'Summary', 'area'), h('b', {}, 'Milestones'),
+          items(o.milestones = o.milestones || [], function (m, mc) { mc.append(fld(m, 'k', 'Heading'), fld(m, 'v', 'Text')); }, function () { return { k: 'HEADING', v: 'Text' }; }, 'Milestone'));
+      }, function () { return { tab: 'NEW', dates: '2026', label: 'LABEL', badge: '', title: 'TITLE', summary: '', milestones: [] }; }, 'Chapter')]; },
+    Projects: function () { return [h('div', { class: 'note' }, '"featured" shows in the Featured Project carousel, "landing" in the Landing Pages wheel. Tools and deliverables are comma separated. Keep at least 3 per section.'),
+      items(S.projects, function (o, c) {
+        c.append(fld(o, 'section', 'Section', 'sel', ['featured', 'landing']), fld(o, 'title', 'Title'), fld(o, 'subtitle', 'Subtitle'), fld(o, 'category', 'Category'),
+          fld(o, 'description', 'Description', 'area'), fld(o, 'image', 'Image', 'img'), fld(o, 'link', 'Live link (optional)'),
+          fld(o, 'tools', 'Tools'), fld(o, 'deliverables', 'Deliverables'), fld(o, 'stats', 'Highlight'));
+      }, function () { return { section: 'featured', category: '', title: 'New project', subtitle: '', description: '', image: 'assets/placeholder-1.png', link: '', tools: '', deliverables: '', stats: '' }; }, 'Project')]; },
+    Services: function () { return [items(S.services, function (o, c) { c.append(fld(o, 'title', 'Title'), fld(o, 'desc', 'Description', 'area'), fld(o, 'deliverables', 'Deliverables')); }, function () { return { title: 'NEW SERVICE', desc: '', deliverables: '' }; }, 'Service')]; },
+    Contact: function () { return [fld(S.contact, 'email', 'Email (contact form opens your mail app; leave empty to just show a thank-you)'), fld(S.contact, 'formMessage', 'Thank-you message (when no email is set)'),
+      h('b', {}, 'Social links (empty URL = hidden)'), items(S.socials, function (o, c) { c.append(fld(o, 'label', 'Name (Instagram, LinkedIn, GitHub and Twitter also fill the header icons)'), fld(o, 'url', 'URL')); }, function () { return { label: 'Behance', url: '' }; }, 'Link')]; },
+    Footer: function () { return [fld(S.footer, 'cta', 'Big footer text'), fld(S.footer, 'credit', 'Credit line'), fld(S.footer, 'copyright', 'Copyright line')]; },
+    Sections: function () { return [h('div', { class: 'note' }, 'Untick to hide a section (and its nav link).')].concat(['stats', 'experience', 'projects', 'landing', 'services'].map(function (k) { return fld(S.show, k, 'Show: ' + k, 'bool'); })); },
+    Security: function () { return [fld(S, 'adminPassword', 'Admin password'), h('div', { class: 'note' }, 'This gate is a convenience, not real security: the password sits in site-data.js, which anyone can read. Do not reuse an important password.')]; }
+  };
+
+  var cur = 'Profile';
+  function show(t) {
+    cur = t;
+    var tabs = $('#tabs'); tabs.innerHTML = '';
+    Object.keys(TABS).forEach(function (k) { tabs.append(h('button', { type: 'button', class: k === t ? 'on' : '', onclick: function () { show(k); } }, k)); });
+    var m = $('#main'); m.innerHTML = ''; m.append(h('h1', {}, t)); TABS[t]().forEach(function (n) { m.append(n); });
+  }
+
+  function save() {
+    try { localStorage.setItem('echo_site', JSON.stringify(S)); msg('Saved. Open the site in this browser to preview.'); }
+    catch (e) { msg('Save failed: images are too large. Use smaller images or file paths.'); }
+  }
+  $('#save').onclick = save;
+  $('#exp').onclick = function () {
+    var a = h('a', { href: URL.createObjectURL(new Blob(['/* Exported from admin.html */\nwindow.SITE_DEFAULT = ' + JSON.stringify(S, null, 2) + ';\n'], { type: 'text/javascript' })), download: 'site-data.js' });
+    document.body.append(a); a.click(); a.remove(); msg('Replace site-data.js with this file, then redeploy.');
+  };
+  $('#imp').onclick = function () { $('#impf').click(); };
+  $('#impf').onchange = function (e) {
+    var f = e.target.files[0]; if (!f) return;
+    var r = new FileReader();
+    r.onload = function () { try { S = JSON.parse(r.result.replace(/^[^{]*/, '').replace(/;\s*$/, '')); Object.keys(D).forEach(function (k) { if (S[k] === undefined) S[k] = clone(D[k]); }); show(cur); msg('Imported. Click Save to keep it.'); } catch (x) { msg('Could not read that file.'); } };
+    r.readAsText(f);
+  };
+  $('#rst').onclick = function () { if (confirm('Discard all saved edits and go back to site-data.js defaults?')) { localStorage.removeItem('echo_site'); location.reload(); } };
+
+  if (sessionStorage.getItem('echo_admin')) open();
+})();
+</script>
+</body>
+</html>
